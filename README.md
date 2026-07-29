@@ -25,7 +25,7 @@ terminal ── herdr binding (ctrl+h)
 
 ## Installation
 
-### 1. Herdr side
+### 1. Herdr
 
 ```sh
 herdr plugin install kaar/nvim-herdr-navigator
@@ -94,13 +94,7 @@ This pays a `/bin/sh -lc` login shell per keypress; the plugin action path is fa
 
 </details>
 
-### 2. Neovim side
-
-With [lazy.nvim](https://github.com/folke/lazy.nvim):
-
-```lua
-{ "kaar/nvim-herdr-navigator" }
-```
+### 2. Neovim
 
 With `vim.pack` (Neovim ≥ 0.12):
 
