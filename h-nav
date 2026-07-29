@@ -32,13 +32,8 @@ pane=${HERDR_PANE_ID:-${HERDR_ACTIVE_PANE_ID:?h-nav must run from a herdr keybin
 # Same process-name test as vim-tmux-navigator's is_vim ps check, applied
 # to the foreground process names herdr reports for the pane. Matches
 # vi/vim/nvim/gvim/view/lvim/... and fzf (so ctrl+j/k keep moving fzf's
-# selection). HERDR_NAVIGATOR_PASSTHROUGH_RE extends (never replaces) the
-# pattern with extra process names to pass the chords through to, e.g.
-# "lazygit|k9s".
+# selection).
 pattern='g?\.?(view|l?n?vim?x?|fzf)(diff)?(-wrapped)?'
-if [ -n "${HERDR_NAVIGATOR_PASSTHROUGH_RE:-}" ]; then
-	pattern="$pattern|${HERDR_NAVIGATOR_PASSTHROUGH_RE}"
-fi
 
 # The grep keys off the "name":"..." fields of the process-info JSON: the
 # quote delimiters anchor the match to the whole process name, so no jq

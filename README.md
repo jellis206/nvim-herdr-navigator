@@ -125,12 +125,6 @@ require("herdr-navigator").setup({
 })
 ```
 
-On the herdr side, `HERDR_NAVIGATOR_PASSTHROUGH_RE` (a POSIX extended regex over foreground process names, set in the herdr server's environment) extends — never replaces — the vim/fzf pattern, so other TUIs can receive the chords too:
-
-```sh
-HERDR_NAVIGATOR_PASSTHROUGH_RE='lazygit|k9s'
-```
-
 ## Notes & trade-offs
 
 - **Shadowed shell keys.** Like the tmux original, shells lose direct `ctrl+l` (clear), `ctrl+k` (kill-to-EOL) and `ctrl+h` (backspace) to navigation. `prefix+ctrl+l` restores clear-screen; the others still work while typing in vim's insert mode and in any pane whose foreground process matches the passthrough pattern.

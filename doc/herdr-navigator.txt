@@ -119,12 +119,6 @@ Optional; only needed to override defaults: >lua
     `"update"` runs |:update|, `"wall"` runs |:wall| before leaving vim
     for a herdr pane. Default: nil (write nothing).
 
-                                          *$HERDR_NAVIGATOR_PASSTHROUGH_RE*
-The herdr half reads `HERDR_NAVIGATOR_PASSTHROUGH_RE` (a POSIX extended
-regex over foreground process names, e.g. `lazygit|k9s`) and ORs it into
-the default vim/fzf pattern, so extra TUIs can receive the chords too.
-It must be set in the herdr server's environment.
-
 ==============================================================================
 7. HEALTH                                               *herdr-navigator-health*
 
