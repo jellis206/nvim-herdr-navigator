@@ -19,6 +19,9 @@ function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", M.config, opts or {})
 end
 
+-- Notify about a broken herdr_bin once per session, not on every crossing.
+local spawn_failure_notified = false
+
 local wincmds = {
   left = "h",
   down = "j",
@@ -48,7 +51,14 @@ function M.navigate(direction)
   end
   -- Async fire-and-forget: the focus change needs nothing from vim, and
   -- blocking on the CLI round-trip would stall the UI on every crossing.
-  vim.system({ M.config.herdr_bin, "pane", "focus", "--direction", direction, "--current" })
+  local ok, err = pcall(vim.system, { M.config.herdr_bin, "pane", "focus", "--direction", direction, "--current" })
+  if not ok and not spawn_failure_notified then
+    spawn_failure_notified = true
+    vim.notify(
+      ("herdr-navigator: could not run %q (%s) — see :checkhealth herdr-navigator"):format(M.config.herdr_bin, err),
+      vim.log.levels.ERROR
+    )
+  end
 end
 
 return M

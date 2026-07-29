@@ -6,17 +6,10 @@ if vim.g.loaded_herdr_navigator then
 end
 vim.g.loaded_herdr_navigator = 1
 
--- No-op outside herdr. Inside tmux (even nested in a herdr pane) defer
--- to vim-tmux-navigator, whose tmux side handles the inner boundary.
-if vim.env.HERDR_ENV ~= "1" or vim.env.TMUX then
+-- No-op outside herdr. tmux inside a herdr pane is not supported: herdr
+-- owns the chords and does not pass them through to tmux.
+if vim.env.HERDR_ENV ~= "1" then
   return
-end
-
--- Ask vim-tmux-navigator not to claim the chords too. Only effective
--- when this file loads before it — see the coexistence recipe in the
--- README for the load-order-proof version.
-if vim.g.tmux_navigator_no_mappings == nil then
-  vim.g.tmux_navigator_no_mappings = 1
 end
 
 for name, direction in pairs({

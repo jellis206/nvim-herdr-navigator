@@ -3,9 +3,9 @@ local M = {}
 function M.check()
   vim.health.start("herdr-navigator")
 
-  local active = vim.env.HERDR_ENV == "1" and not vim.env.TMUX
+  local active = vim.env.HERDR_ENV == "1"
 
-  if vim.env.HERDR_ENV == "1" then
+  if active then
     vim.health.ok("HERDR_ENV=1 — running inside a herdr pane")
   else
     vim.health.warn(
@@ -16,8 +16,8 @@ function M.check()
 
   if vim.env.TMUX then
     vim.health.warn(
-      "$TMUX is set — plugin is inactive inside tmux",
-      { "Inside tmux (even nested in a herdr pane) navigation defers to vim-tmux-navigator." }
+      "$TMUX is set — tmux inside a herdr pane is not supported",
+      { "herdr owns the ctrl+h/j/k/l chords and does not pass them through to tmux; navigation will not work as expected." }
     )
   end
 

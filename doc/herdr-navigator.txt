@@ -12,8 +12,7 @@ CONTENTS                                              *herdr-navigator-contents*
   4. Mappings ............................. |herdr-navigator-mappings|
   5. Commands ............................. |herdr-navigator-commands|
   6. Configuration ........................ |herdr-navigator-configuration|
-  7. Coexistence with vim-tmux-navigator .. |herdr-navigator-tmux|
-  8. Health ............................... |herdr-navigator-health|
+  7. Health ............................... |herdr-navigator-health|
 
 ==============================================================================
 1. INTRODUCTION                                   *herdr-navigator-introduction*
@@ -34,7 +33,11 @@ It is a two-sided handshake:
   of vim's layout.
 
 The plugin is a no-op unless nvim runs inside a herdr pane
-(`$HERDR_ENV == 1`) and outside tmux (see |herdr-navigator-tmux|).
+(`$HERDR_ENV == 1`).
+
+Note: tmux inside a herdr pane is not supported. herdr owns the
+`ctrl+h/j/k/l` chords and does not pass them through to tmux, so they
+never reach a nested tmux session (or vim-tmux-navigator inside it).
 
 ==============================================================================
 2. REQUIREMENTS                                   *herdr-navigator-requirements*
@@ -123,31 +126,12 @@ the default vim/fzf pattern, so extra TUIs can receive the chords too.
 It must be set in the herdr server's environment.
 
 ==============================================================================
-7. COEXISTENCE WITH VIM-TMUX-NAVIGATOR                     *herdr-navigator-tmux*
-
-Inside tmux — including tmux nested in a herdr pane — this plugin stays
-inactive and vim-tmux-navigator handles the inner boundary unchanged.
-
-When active, the plugin sets |g:tmux_navigator_no_mappings| so
-vim-tmux-navigator does not also claim the chords. Because plugin load
-order varies across managers, prefer setting the flag yourself before
-plugins load: >lua
-    -- lazy.nvim spec for vim-tmux-navigator
-    {
-      "christoomey/vim-tmux-navigator",
-      init = function()
-        if vim.env.HERDR_ENV == "1" and not vim.env.TMUX then
-          vim.g.tmux_navigator_no_mappings = 1
-        end
-      end,
-    }
-<
-==============================================================================
-8. HEALTH                                               *herdr-navigator-health*
+7. HEALTH                                               *herdr-navigator-health*
 
 Run `:checkhealth herdr-navigator` to verify: the plugin is active
-($HERDR_ENV set, $TMUX unset), the herdr binary is executable, and
+($HERDR_ENV set), the herdr binary is executable, and
 `herdr pane process-info --current` answers (so the edge handoff will
-work).
+work). Warns when $TMUX is set — tmux inside a herdr pane is not
+supported (see |herdr-navigator-introduction|).
 
 vim:tw=78:ts=8:noet:ft=help:norl:

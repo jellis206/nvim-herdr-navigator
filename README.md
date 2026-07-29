@@ -108,22 +108,7 @@ With `vim.pack` (Neovim ≥ 0.12):
 vim.pack.add({ "https://github.com/kaar/nvim-herdr-navigator" })
 ```
 
-No `setup()` call is required. The plugin is a no-op unless nvim runs inside a herdr pane (`$HERDR_ENV == 1`) and outside tmux.
-
-#### Coexisting with vim-tmux-navigator
-
-Inside tmux — including tmux nested in a herdr pane — this plugin stays inactive and vim-tmux-navigator keeps working unchanged. When active, this plugin sets `g:tmux_navigator_no_mappings` so vim-tmux-navigator doesn't also claim the chords, but plugin load order varies across managers; the load-order-proof recipe is to set the flag yourself:
-
-```lua
-{
-  "christoomey/vim-tmux-navigator",
-  init = function()
-    if vim.env.HERDR_ENV == "1" and not vim.env.TMUX then
-      vim.g.tmux_navigator_no_mappings = 1
-    end
-  end,
-}
-```
+No `setup()` call is required. The plugin is a no-op unless nvim runs inside a herdr pane (`$HERDR_ENV == 1`).
 
 ## Usage
 
@@ -154,6 +139,7 @@ HERDR_NAVIGATOR_PASSTHROUGH_RE='lazygit|k9s'
 
 - **Shadowed shell keys.** Like the tmux original, shells lose direct `ctrl+l` (clear), `ctrl+k` (kill-to-EOL) and `ctrl+h` (backspace) to navigation. `prefix+ctrl+l` restores clear-screen; the others still work while typing in vim's insert mode and in any pane whose foreground process matches the passthrough pattern.
 - **`ctrl+h` vs Backspace.** `ctrl+h` and Backspace share byte `0x08` in legacy terminal encoding, so pass-through only distinguishes them when the kitty keyboard protocol is active. Neovim ≥ 0.10 negotiates it automatically inside herdr panes, keeping `<C-h>` distinct from `<BS>`.
+- **tmux is not supported.** Running tmux inside a herdr pane — with or without vim-tmux-navigator — is unsupported: herdr owns the chords and does not pass them through to tmux, so the chords never reach a nested tmux session. Use herdr panes directly instead.
 - **Normal mode only** (for now). Terminal-mode mappings à la vim-tmux-navigator are a planned follow-up.
 - **No wrap.** `herdr pane focus --direction` stops at the screen edge instead of wrapping — the behaviour vim-tmux-navigator ships `no_wrap` to get.
 - **Latency.** Worst case two CLI round-trips per keypress (~10 ms each), no login shell on the plugin-action path. The endgame is a native pass-through predicate upstream in herdr (see `docs/upstream-passthrough-investigation.md`).
@@ -164,7 +150,7 @@ HERDR_NAVIGATOR_PASSTHROUGH_RE='lazygit|k9s'
 :checkhealth herdr-navigator
 ```
 
-Verifies the plugin is active (`$HERDR_ENV` set, `$TMUX` unset), the herdr binary is executable, and `herdr pane process-info --current` answers.
+Verifies the plugin is active (`$HERDR_ENV` set), the herdr binary is executable, and `herdr pane process-info --current` answers. Warns when `$TMUX` is set (unsupported, see notes).
 
 ## Development
 
