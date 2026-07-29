@@ -2,7 +2,7 @@
 
 Seamless navigation between Neovim splits and [herdr](https://herdr.dev) panes: one set of `ctrl+h/j/k/l` chords moves through vim windows and herdr panes as if they were a single layout. A port of the [vim-tmux-navigator](https://github.com/christoomey/vim-tmux-navigator) pattern to herdr.
 
-This repository ships **both halves** — the Neovim plugin (`plugin/`, `lua/`, `doc/`) and the herdr plugin (`herdr-plugin.toml`, `h-nav`) — the same way vim-tmux-navigator ships its `.tmux` file alongside the vim plugin.
+This repository contains both the nvim plugin (`plugin/`, `lua/`, `doc/`) and the herdr plugin (`herdr-plugin.toml`, `h-nav`)
 
 ## How it works
 
