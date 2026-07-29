@@ -12,6 +12,15 @@ if vim.env.HERDR_ENV ~= "1" then
   return
 end
 
+-- Plugin arbitration, not tmux support: vim-tmux-navigator maps the same
+-- chords even outside tmux (degrading to plain wincmd, which would break
+-- the edge handoff). If it loads after us, this flag stops it mapping;
+-- if it loaded first, our mappings below overwrite its. Either order,
+-- the right plugin owns the chords per environment.
+if vim.g.tmux_navigator_no_mappings == nil then
+  vim.g.tmux_navigator_no_mappings = 1
+end
+
 for name, direction in pairs({
   Left = "left",
   Down = "down",

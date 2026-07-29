@@ -104,6 +104,8 @@ vim.pack.add({ "https://github.com/kaar/nvim-herdr-navigator" })
 
 No `setup()` call is required. The plugin is a no-op unless nvim runs inside a herdr pane (`$HERDR_ENV == 1`).
 
+[vim-tmux-navigator](https://github.com/christoomey/vim-tmux-navigator) can stay installed alongside: inside herdr this plugin owns the chords (it sets `g:tmux_navigator_no_mappings`, and its mappings win regardless of plugin load order); inside tmux it stays inactive and vim-tmux-navigator works as usual.
+
 ## Usage
 
 | Focused pane  | `ctrl+h/j/k/l` does                                  |
