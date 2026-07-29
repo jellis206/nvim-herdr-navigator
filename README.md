@@ -76,24 +76,6 @@ Reload and check for a clean diagnostics list:
 herdr server reload-config
 ```
 
-<details>
-<summary>No-install fallback: bare shell keybindings (no herdr plugin)</summary>
-
-`h-nav` also works as a plain `type = "shell"` custom command — copy it somewhere stable and bind:
-
-```toml
-[[keys.command]]
-key = "ctrl+h"
-type = "shell"
-command = "$HOME/.config/herdr/scripts/h-nav left"
-description = "navigate left (nvim/herdr)"
-# ... same for ctrl+j/k/l with down/up/right
-```
-
-This pays a `/bin/sh -lc` login shell per keypress; the plugin action path is faster.
-
-</details>
-
 ### 2. Neovim
 
 With `vim.pack` (Neovim ≥ 0.12):

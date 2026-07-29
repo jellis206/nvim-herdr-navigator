@@ -25,9 +25,8 @@ right) key=ctrl+l ;;
 esac
 
 herdr=${HERDR_BIN_PATH:-herdr}
-# HERDR_PANE_ID is set for plugin actions, HERDR_ACTIVE_PANE_ID for bare
-# type="shell" keybindings — accept both so the script works either way.
-pane=${HERDR_PANE_ID:-${HERDR_ACTIVE_PANE_ID:?h-nav must run from a herdr keybinding}}
+# Set by herdr for plugin actions; holds the focused pane at keypress time.
+pane=${HERDR_PANE_ID:?h-nav must run as a herdr plugin action}
 
 # Same process-name test as vim-tmux-navigator's is_vim ps check, applied
 # to the foreground process names herdr reports for the pane. Matches
