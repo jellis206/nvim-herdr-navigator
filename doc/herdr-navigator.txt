@@ -1,0 +1,153 @@
+*herdr-navigator.txt*  Seamless navigation between Neovim splits and herdr panes
+
+Author:  Caspar Nettelbladt
+License: MIT
+
+==============================================================================
+CONTENTS                                              *herdr-navigator-contents*
+
+  1. Introduction ......................... |herdr-navigator-introduction|
+  2. Requirements ......................... |herdr-navigator-requirements|
+  3. Installation ......................... |herdr-navigator-installation|
+  4. Mappings ............................. |herdr-navigator-mappings|
+  5. Commands ............................. |herdr-navigator-commands|
+  6. Configuration ........................ |herdr-navigator-configuration|
+  7. Coexistence with vim-tmux-navigator .. |herdr-navigator-tmux|
+  8. Health ............................... |herdr-navigator-health|
+
+==============================================================================
+1. INTRODUCTION                                   *herdr-navigator-introduction*
+
+nvim-herdr-navigator ports the vim-tmux-navigator pattern to herdr
+(https://herdr.dev): a single set of `ctrl+h/j/k/l` chords moves between
+Neovim windows and herdr panes as if they were one layout.
+
+It is a two-sided handshake:
+
+- The herdr half (a herdr plugin shipped in this same repo: the
+  `herdr-plugin.toml` manifest and the `h-nav` script) owns the direct
+  chords, but passes them through to the pane when its foreground process
+  is vim-like (vi/vim/nvim/gvim/view/lvim/... or fzf).
+- The nvim half (this plugin) owns the chords while nvim is focused,
+  moves between vim windows, and hands navigation back to herdr
+  (`herdr pane focus --direction ...`) when a window move hits the edge
+  of vim's layout.
+
+The plugin is a no-op unless nvim runs inside a herdr pane
+(`$HERDR_ENV == 1`) and outside tmux (see |herdr-navigator-tmux|).
+
+==============================================================================
+2. REQUIREMENTS                                   *herdr-navigator-requirements*
+
+- Neovim >= 0.10 (|vim.system()|; also negotiates the kitty keyboard
+  protocol, which keeps `<C-h>` distinct from `<BS>` — see the README's
+  notes on the 0x08 legacy encoding).
+- herdr >= 0.7.4, macOS or Linux.
+- The herdr half of this repo installed as a herdr plugin (see
+  |herdr-navigator-installation|).
+
+==============================================================================
+3. INSTALLATION                                   *herdr-navigator-installation*
+
+Both halves come from this one repository.
+
+Herdr side: >sh
+    herdr plugin install kaar/nvim-herdr-navigator
+<
+then bind the actions in `~/.config/herdr/config.toml` (see the README
+for the full snippet, including the `prefix+ctrl+l` clear-screen restore): >toml
+    [[keys.command]]
+    key = "ctrl+h"
+    type = "plugin_action"
+    command = "herdr-navigator.left"
+    # ... ctrl+j -> .down, ctrl+k -> .up, ctrl+l -> .right
+<
+and reload with `herdr server reload-config`. The direct `ctrl+h/j/k/l`
+chords must NOT also be bound to the `focus_pane_*` actions.
+
+Neovim side, e.g. with lazy.nvim: >lua
+    { "kaar/nvim-herdr-navigator" }
+<
+No `setup()` call is required.
+
+==============================================================================
+4. MAPPINGS                                           *herdr-navigator-mappings*
+
+When active, the plugin creates normal-mode mappings:
+
+  `<C-h>`   window left,  or herdr pane left at the edge
+  `<C-j>`   window below, or herdr pane below at the edge
+  `<C-k>`   window above, or herdr pane above at the edge
+  `<C-l>`   window right, or herdr pane right at the edge
+
+                                             *g:herdr_navigator_no_mappings*
+To define your own mappings instead, set >lua
+    vim.g.herdr_navigator_no_mappings = 1
+<
+before plugins load, then map the |herdr-navigator-commands| yourself.
+
+==============================================================================
+5. COMMANDS                                           *herdr-navigator-commands*
+
+                                                          *:HerdrNavigateLeft*
+                                                          *:HerdrNavigateDown*
+                                                            *:HerdrNavigateUp*
+                                                         *:HerdrNavigateRight*
+:HerdrNavigateLeft / Down / Up / Right
+    Move to the vim window in that direction, or to the neighbouring
+    herdr pane when already at vim's layout edge. Equivalent to >lua
+        require("herdr-navigator").navigate("left")
+<
+==============================================================================
+6. CONFIGURATION                                 *herdr-navigator-configuration*
+
+                                                      *herdr-navigator-setup()*
+Optional; only needed to override defaults: >lua
+    require("herdr-navigator").setup({
+      herdr_bin = "herdr",    -- path to the herdr binary
+      save_on_switch = nil,   -- nil | "update" | "wall"
+    })
+<
+  herdr_bin ~
+    Binary used for the edge handoff. Default: `"herdr"` (resolved from
+    $PATH; inside herdr panes there is no $HERDR_BIN_PATH).
+
+  save_on_switch ~
+    `"update"` runs |:update|, `"wall"` runs |:wall| before leaving vim
+    for a herdr pane. Default: nil (write nothing).
+
+                                          *$HERDR_NAVIGATOR_PASSTHROUGH_RE*
+The herdr half reads `HERDR_NAVIGATOR_PASSTHROUGH_RE` (a POSIX extended
+regex over foreground process names, e.g. `lazygit|k9s`) and ORs it into
+the default vim/fzf pattern, so extra TUIs can receive the chords too.
+It must be set in the herdr server's environment.
+
+==============================================================================
+7. COEXISTENCE WITH VIM-TMUX-NAVIGATOR                     *herdr-navigator-tmux*
+
+Inside tmux — including tmux nested in a herdr pane — this plugin stays
+inactive and vim-tmux-navigator handles the inner boundary unchanged.
+
+When active, the plugin sets |g:tmux_navigator_no_mappings| so
+vim-tmux-navigator does not also claim the chords. Because plugin load
+order varies across managers, prefer setting the flag yourself before
+plugins load: >lua
+    -- lazy.nvim spec for vim-tmux-navigator
+    {
+      "christoomey/vim-tmux-navigator",
+      init = function()
+        if vim.env.HERDR_ENV == "1" and not vim.env.TMUX then
+          vim.g.tmux_navigator_no_mappings = 1
+        end
+      end,
+    }
+<
+==============================================================================
+8. HEALTH                                               *herdr-navigator-health*
+
+Run `:checkhealth herdr-navigator` to verify: the plugin is active
+($HERDR_ENV set, $TMUX unset), the herdr binary is executable, and
+`herdr pane process-info --current` answers (so the edge handoff will
+work).
+
+vim:tw=78:ts=8:noet:ft=help:norl:
