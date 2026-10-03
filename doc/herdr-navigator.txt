@@ -23,14 +23,24 @@ Neovim windows and herdr panes as if they were one layout.
 
 It is a two-sided handshake:
 
-- The herdr half (a herdr plugin shipped in this same repo: the
-  `herdr-plugin.toml` manifest and the `h-nav` script) owns the direct
-  chords, but passes them through to the pane when its foreground process
-  is Neovim or fzf. For other processes, including Vim, it moves herdr
-  pane focus directly.
-- The Neovim half (this plugin) tries Neovim windows first, then requests
-  herdr pane focus (`herdr pane focus --direction ...`) at the layout edge.
-  fzf handles the key itself, without the Neovim edge handoff.
+- The herdr half (`herdr-plugin.toml` and `h-nav`) owns the direct chords.
+  Keybindings supply `invocation_source: "keybinding"` in
+  `HERDR_PLUGIN_CONTEXT_JSON`. For Neovim or fzf, `h-nav` forwards the key.
+  For other processes, including Vim, it runs `herdr pane focus`.
+- The Neovim half tries Neovim windows first. At the layout edge, it
+  asynchronously runs `herdr plugin action invoke herdr-navigator.<direction>`.
+  This calls the same action with `invocation_source: "cli"`. `h-nav` skips
+  process detection and key forwarding, then focuses the neighbouring pane.
+  This prevents a loop back into Neovim. fzf handles the forwarded key itself.
+
+The four actions are `left`, `down`, `up`, and `right`. Manual CLI calls
+always move pane focus, without Neovim window navigation or fzf key handling.
+Other nonempty source strings retain the keybinding path.
+
+`h-nav` reads the source with `jq`. Missing `jq`, absent or malformed JSON,
+or a missing, empty, or non-string source stops navigation with an error.
+No keys or focus changes follow this error. Herdr must supply
+`HERDR_BIN_PATH` and `HERDR_PANE_ID` for each action.
 
 The plugin is a no-op unless nvim runs inside a herdr pane
 (`$HERDR_ENV == 1`).
@@ -45,9 +55,11 @@ never reach a nested tmux session (or vim-tmux-navigator inside it).
 - Neovim >= 0.10 (|vim.system()|; also negotiates the kitty keyboard
   protocol, which keeps `<C-h>` distinct from `<BS>` — see the README's
   notes on the 0x08 legacy encoding).
-- herdr >= 0.7.4, macOS or Linux.
-- The herdr half of this repo installed as a herdr plugin (see
-  |herdr-navigator-installation|).
+- herdr >= 0.9.1 for invocation-source routing, macOS or Linux.
+- `jq` on the Herdr plugin runtime's $PATH. Every navigation action requires
+  it, including key forwarding.
+- The herdr half of this repo installed and enabled as a herdr plugin (see
+  |herdr-navigator-installation|). Neovim edge navigation requires its actions.
 
 ==============================================================================
 3. INSTALLATION                                   *herdr-navigator-installation*
@@ -112,8 +124,9 @@ Optional; only needed to override defaults: >lua
     })
 <
   herdr_bin ~
-    Binary used for the edge handoff. Default: `"herdr"` (resolved from
-    $PATH; inside herdr panes there is no $HERDR_BIN_PATH).
+    Binary used to call the plugin action at the layout edge.
+    Default: `"herdr"` (resolved from Neovim's $PATH).
+    The action itself uses the required $HERDR_BIN_PATH supplied by Herdr.
 
   save_on_switch ~
     `"update"` runs |:update|, `"wall"` runs |:wall| before leaving vim
@@ -122,10 +135,25 @@ Optional; only needed to override defaults: >lua
 ==============================================================================
 7. HEALTH                                               *herdr-navigator-health*
 
-Run `:checkhealth herdr-navigator` to verify: the plugin is active
-($HERDR_ENV set), the herdr binary is executable, and
-`herdr pane process-info --current` answers (so the edge handoff will
-work). Warns when $TMUX is set — tmux inside a herdr pane is not
-supported (see |herdr-navigator-introduction|).
+Run `:checkhealth herdr-navigator`.
+
+The health check reports whether the plugin is active ($HERDR_ENV == 1),
+the herdr binary is executable, and the server answers process-info requests.
+It warns when $TMUX is set. tmux inside a herdr pane is not supported
+(see |herdr-navigator-introduction|).
+
+A successful process-info request establishes server reachability, not
+successful edge navigation. The health check does not check the Herdr
+version, installed actions, or `jq` in the plugin runtime. Neovim and the
+plugin runtime can have different $PATH values.
+
+If edge navigation fails, inspect the installed actions and plugin logs: >sh
+    herdr plugin action list --plugin herdr-navigator
+    herdr plugin log list --plugin herdr-navigator
+<
+Missing or disabled actions and routing errors require an installation fix.
+There is no direct-focus fallback. The Lua notification reports only failure
+to start the Herdr executable. Action invocation returns before the action
+completes, so command failures require inspection of the plugin logs.
 
 vim:tw=78:ts=8:noet:ft=help:norl:

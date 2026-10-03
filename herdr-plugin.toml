@@ -6,14 +6,16 @@
 #   herdr plugin link /path/to/nvim-herdr-navigator
 #
 # Neovim-aware directional pane focus (vim-tmux-navigator pattern):
-# h-nav passes ctrl+h/j/k/l through to Neovim or fzf. The Neovim plugin
-# tries its windows first, then requests herdr pane focus at the edge.
-# For other processes, including Vim, h-nav moves herdr pane focus directly.
+# Keybindings let h-nav forward ctrl+h/j/k/l to Neovim or fzf.
+# Neovim tries its windows first, then calls the same action via the CLI.
+# CLI invocations skip key forwarding and focus a pane through h-nav.
+# For other processes, including Vim, keybindings also focus panes directly.
+# h-nav requires jq to read HERDR_PLUGIN_CONTEXT_JSON.invocation_source.
 
 id = "herdr-navigator"
 name = "Herdr Navigator"
 version = "0.1.0"
-min_herdr_version = "0.7.4"
+min_herdr_version = "0.9.1"
 description = "Seamless ctrl+h/j/k/l across herdr panes and Neovim splits."
 platforms = ["linux", "macos"]
 

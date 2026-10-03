@@ -5,9 +5,10 @@
 #
 # Runs as a plugin action (see herdr-plugin.toml), bound to the direct
 # ctrl+h/j/k/l chords as [[keys.command]] type="plugin_action" in the
-# user's config.toml. Pass the chord through to Neovim or fzf.
-# The Neovim plugin tries its windows first, then calls `herdr pane focus`
-# at its layout edge. fzf handles the key itself. For other processes,
+# user's config.toml. Keybindings forward the chord to Neovim or fzf.
+# The Neovim plugin tries its windows first, then invokes the same action
+# via the CLI at its layout edge. CLI invocations focus panes without
+# forwarding keys. fzf handles the key itself. For other processes,
 # including Vim, move focus directly to the neighbouring herdr pane.
 
 set -eu
@@ -25,8 +26,16 @@ right) key=ctrl+l ;;
 esac
 
 herdr=${HERDR_BIN_PATH:?must run as a herdr plugin action}
-# Set by herdr for plugin actions; holds the focused pane at keypress time.
+# Set by herdr for plugin actions; identifies the pane for this invocation.
 pane_id=${HERDR_PANE_ID:?must run as a herdr plugin action}
+
+# jq is required for every invocation, including key forwarding.
+# Reject missing/invalid sources rather than risking an edge-handoff loop.
+invocation_source=$(printf '%s\n' "${HERDR_PLUGIN_CONTEXT_JSON:-}" |
+  jq -er '.invocation_source | select(type == "string" and length > 0)') || {
+  echo "h-nav: cannot read invocation_source from HERDR_PLUGIN_CONTEXT_JSON (requires jq)" >&2
+  exit 1
+}
 
 nvim_or_fzf_in_pane() {
   # Match Neovim or fzf process names, including wrapped binaries.
@@ -35,10 +44,14 @@ nvim_or_fzf_in_pane() {
     grep -iqE "\"name\":\"($pattern)\""
 }
 
-if nvim_or_fzf_in_pane; then
-  # Pass the key through: Neovim tries its windows first and requests
-  # herdr pane focus only at its layout edge; fzf handles the key itself.
-  exec "$herdr" pane send-keys "$pane_id" "$key"
+# invocation_source
+# - keybinding: a Herdr keyboard binding
+# - cli: `herdr plugin action invoke` call from nvim
+if [ "$invocation_source" = keybinding ] && nvim_or_fzf_in_pane; then
+ # Forward keys only for keybindings. Neovim tries its windows first,
+ # then invokes this action via the CLI at its layout edge.
+ exec "$herdr" pane send-keys "$pane_id" "$key"
 else
-  exec "$herdr" pane focus --direction "$dir" --pane "$pane_id"
+ # CLI and other invocation sources navigate panes without key forwarding.
+ exec "$herdr" pane focus --direction "$dir" --pane "$pane_id"
 fi

@@ -36,11 +36,12 @@ function M.check()
     return
   end
 
+  -- This probe checks server reachability, not actions or runtime dependencies.
   local ok, res = pcall(function()
     return vim.system({ bin, "pane", "process-info", "--current" }, { text = true }):wait(2000)
   end)
   if ok and res and res.code == 0 then
-    vim.health.ok("`herdr pane process-info --current` succeeded — edge handoff will work")
+    vim.health.ok("`herdr pane process-info --current` succeeded. The herdr server is reachable.")
   else
     local detail = ok and res and (res.stderr or res.stdout or "") or tostring(res)
     vim.health.error(

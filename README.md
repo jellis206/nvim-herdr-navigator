@@ -2,27 +2,33 @@
 
 Seamless navigation between Neovim splits and [herdr](https://herdr.dev) panes: one set of `ctrl+h/j/k/l` chords moves through Neovim windows and herdr panes as if they were a single layout. A port of the [vim-tmux-navigator](https://github.com/christoomey/vim-tmux-navigator) pattern to herdr.
 
-This repository contains both the nvim plugin (`plugin/`, `lua/`, `doc/`) and the herdr plugin (`herdr-plugin.toml`, `h-nav`)
+This repository contains both the Neovim plugin (`plugin/`, `lua/`, `doc/`) and the herdr plugin (`herdr-plugin.toml`, `h-nav`).
 
 ## How it works
 
-Herdr routes `ctrl+h/j/k/l` to the application first when it supports navigation:
+The four actions (`left`, `down`, `up`, `right`) handle both keybindings and Neovim edge navigation:
 
-1. **Herdr owns the chords.** Each keypress runs the `h-nav` plugin action, which checks the focused pane's foreground process. For Neovim or fzf, it passes the chord through with `herdr pane send-keys`. For other processes, including Vim, it moves herdr pane focus directly with `herdr pane focus --direction`.
-2. **Neovim tries its windows first.** The plugin mappings move between Neovim windows. At the layout edge, the plugin asynchronously requests `herdr pane focus` to move to the neighbouring pane. fzf handles the key itself, without the Neovim edge handoff.
+1. **Herdr owns the chords.** Each keypress runs `h-nav` with `invocation_source: "keybinding"` in `HERDR_PLUGIN_CONTEXT_JSON`. For Neovim or fzf, `h-nav` forwards the chord with `herdr pane send-keys`. For other processes, including Vim, it runs `herdr pane focus --direction`.
+2. **Neovim tries its windows first.** At the layout edge, the plugin asynchronously runs `herdr plugin action invoke herdr-navigator.<direction>`. This calls the same action with `invocation_source: "cli"`. `h-nav` skips process detection and key forwarding, then focuses the neighbouring pane. This prevents a loop back into Neovim. fzf handles the forwarded key itself.
 
 ```
-terminal ── herdr binding (ctrl+h)
-             ├─ Neovim ── send-keys ──▶ nvim wincmd
-             │                           └─ at split edge? ──▶ herdr pane focus
-             ├─ fzf ── send-keys ──▶ fzf handles the key
-             └─ other (including Vim) ──▶ herdr pane focus
+herdr keybinding ── action ── h-nav (keybinding)
+                              ├─ Neovim ── send-keys ── wincmd
+                              │                           └─ edge ── same action (cli) ── h-nav ── pane focus
+                              ├─ fzf ── send-keys ── fzf handles the key
+                              └─ other (including Vim) ── pane focus
 ```
+
+`h-nav` uses `jq` to read the source from the context JSON. Missing `jq`, absent or malformed JSON, or a missing, empty, or non-string source stops navigation with an error. It does not forward keys or focus a pane after this error. Other nonempty source strings retain the keybinding path.
+
+Herdr must supply `HERDR_BIN_PATH` and `HERDR_PANE_ID` for each action. `h-nav` uses the supplied binary and pane ID for every Herdr command.
 
 ## Requirements
 
-- herdr ≥ 0.7.4 (macOS or Linux)
+- herdr ≥ 0.9.1 (for invocation-source routing, macOS or Linux)
+- `jq` on the Herdr plugin runtime's `PATH`, required for all navigation actions, including key forwarding
 - Neovim ≥ 0.10 (for `vim.system` and automatic kitty-keyboard-protocol negotiation, see [notes](#notes--trade-offs))
+- Both halves of this repository installed. The herdr plugin must be enabled for Neovim edge navigation.
 
 ## Installation
 
@@ -97,6 +103,8 @@ No `setup()` call is required. The plugin is a no-op unless nvim runs inside a h
 | vim / nvim    | moves vim windows; crosses out to herdr at the edge  |
 | fzf           | `ctrl+j/k` move the selection (chord passed through) |
 
+Manual CLI calls such as `herdr plugin action invoke herdr-navigator.right` always move pane focus. They skip Neovim windows and fzf key handling.
+
 User commands (for custom mappings): `:HerdrNavigateLeft`, `:HerdrNavigateDown`, `:HerdrNavigateUp`, `:HerdrNavigateRight`. Disable the default mappings with `vim.g.herdr_navigator_no_mappings = 1`.
 
 ## Configuration
@@ -115,7 +123,7 @@ require("herdr-navigator").setup({
 - **tmux is not supported.** Running tmux inside a herdr pane — with or without vim-tmux-navigator — is unsupported: herdr owns the chords and does not pass them through to tmux, so the chords never reach a nested tmux session. Use herdr panes directly instead.
 - **Normal mode only** (for now). Terminal-mode mappings à la vim-tmux-navigator are a planned follow-up.
 - **No wrap.** `herdr pane focus --direction` stops at the screen edge instead of wrapping — the behaviour vim-tmux-navigator ships `no_wrap` to get.
-- **Latency.** Worst case two CLI round-trips per keypress (~10 ms each), no login shell on the plugin-action path. The endgame is a native pass-through predicate upstream in herdr (see `docs/upstream-passthrough-investigation.md`).
+- **Latency.** Each keybinding action queries process information, then forwards a key or focuses a pane. A Neovim edge crossing adds a CLI action invocation and a pane-focus command. Each `h-nav` invocation also runs `jq`. The plugin-action path uses no login shell.
 
 ## Health check
 
@@ -123,7 +131,13 @@ require("herdr-navigator").setup({
 :checkhealth herdr-navigator
 ```
 
-Verifies the plugin is active (`$HERDR_ENV` set), the herdr binary is executable, and `herdr pane process-info --current` answers. Warns when `$TMUX` is set (unsupported, see notes).
+The health check reports whether the plugin is active (`$HERDR_ENV == 1`), the herdr binary is executable, and the server answers process-info requests. It warns when `$TMUX` is set (unsupported, see notes).
+
+A successful process-info request establishes server reachability, not action availability or successful edge navigation. The health check does not check the Herdr version, installed actions, or `jq` in the plugin runtime. Neovim and the plugin runtime can have different `PATH` values.
+
+If edge navigation fails, inspect `herdr plugin action list --plugin herdr-navigator` and `herdr plugin log list --plugin herdr-navigator`. Missing or disabled actions and routing errors require an installation fix. There is no direct-focus fallback.
+
+The Lua notification reports only failure to start the Herdr executable. Action invocation returns before the action completes, so command failures require inspection of the plugin logs.
 
 ## Development
 
@@ -134,7 +148,9 @@ herdr plugin action invoke herdr-navigator.left
 herdr plugin log list --plugin herdr-navigator
 ```
 
-Script edits are live on the next invocation; manifest edits (new/renamed actions) may need a re-link. Design notes and the extraction plan live in [`docs/`](docs/).
+The manual action call demonstrates pane-only CLI navigation, not key forwarding. A real keybinding supplies the `keybinding` source.
+
+Script edits apply on the next invocation. After manifest edits, re-link the plugin. Design notes and plans live in [`docs/`](docs/).
 
 ## Credits
 

@@ -1,12 +1,12 @@
 -- The nvim half of the vim-tmux-navigator pattern for herdr: navigate()
--- moves between vim windows and hands off to herdr when the move hits
--- the edge of vim's layout. The herdr half (herdr-plugin.toml + h-nav at
--- the repo root) passes the ctrl+h/j/k/l chords through to nvim when it
--- is the focused pane's foreground process.
+-- moves between Neovim windows, then calls the same navigation action
+-- via the CLI at the layout edge. The herdr half (herdr-plugin.toml +
+-- h-nav at the repo root) forwards keybinding chords to Neovim or fzf.
+-- CLI invocations skip key forwarding and focus a herdr pane.
 local M = {}
 
 M.config = {
-  -- Path to the herdr binary used for the edge handoff.
+  -- Path to the herdr binary used to call the action at the layout edge.
   herdr_bin = "herdr",
   -- nil | "update" | "wall": write buffers before leaving vim.
   save_on_switch = nil,
@@ -43,15 +43,17 @@ function M.navigate(direction)
     return
   end
 
-  -- At the edge: no vim window in that direction, ask herdr to move.
+  -- At the edge: call the same action via the CLI after the optional save.
+  -- Herdr supplies invocation_source="cli", so h-nav cannot forward the key.
   if M.config.save_on_switch == "update" then
     vim.cmd.update()
   elseif M.config.save_on_switch == "wall" then
     vim.cmd.wall()
   end
-  -- Async fire-and-forget: the focus change needs nothing from vim, and
-  -- blocking on the CLI round-trip would stall the UI on every crossing.
-  local ok, err = pcall(vim.system, { M.config.herdr_bin, "pane", "focus", "--direction", direction, "--current" })
+  -- Async: do not wait for the CLI round-trip or stall Neovim's UI.
+  -- Action invocation acknowledges startup, not the completed focus change.
+  -- pcall reports spawn failures only. Action errors appear in plugin logs.
+  local ok, err = pcall(vim.system, { M.config.herdr_bin, "plugin", "action", "invoke", "herdr-navigator." .. direction })
   if not ok and not spawn_failure_notified then
     spawn_failure_notified = true
     vim.notify(
