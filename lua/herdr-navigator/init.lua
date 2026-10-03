@@ -16,7 +16,7 @@ M.config = {
 --- mappings and user commands come from plugin/herdr-navigator.lua and
 --- do not require calling setup().
 function M.setup(opts)
-  M.config = vim.tbl_deep_extend("force", M.config, opts or {})
+  M.config = vim.tbl_extend("force", M.config, opts or {})
 end
 
 -- Notify about a broken herdr_bin once per session, not on every crossing.

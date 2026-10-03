@@ -21,28 +21,26 @@ if vim.g.tmux_navigator_no_mappings == nil then
   vim.g.tmux_navigator_no_mappings = 1
 end
 
-for name, direction in pairs({
-  Left = "left",
-  Down = "down",
-  Up = "up",
-  Right = "right",
+for name, key in pairs({
+  Left = "<C-h>",
+  Down = "<C-j>",
+  Up = "<C-k>",
+  Right = "<C-l>",
 }) do
-  vim.api.nvim_create_user_command("HerdrNavigate" .. name, function()
+  local direction = name:lower()
+  local desc = "Go to window / herdr pane " .. direction
+  local function navigate()
     require("herdr-navigator").navigate(direction)
-  end, { desc = "Go to window / herdr pane " .. direction })
-end
+  end
 
-if vim.g.herdr_navigator_no_mappings then
-  return
-end
+  vim.api.nvim_create_user_command("HerdrNavigate" .. name, navigate, {
+    desc = desc,
+  })
 
-for key, direction in pairs({
-  ["<C-h>"] = "left",
-  ["<C-j>"] = "down",
-  ["<C-k>"] = "up",
-  ["<C-l>"] = "right",
-}) do
-  vim.keymap.set("n", key, function()
-    require("herdr-navigator").navigate(direction)
-  end, { silent = true, desc = "Go to window / herdr pane " .. direction })
+  if not vim.g.herdr_navigator_no_mappings then
+    vim.keymap.set("n", key, navigate, {
+      silent = true,
+      desc = desc,
+    })
+  end
 end
