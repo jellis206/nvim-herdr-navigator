@@ -13,6 +13,8 @@ CONTENTS                                              *herdr-navigator-contents*
   5. Commands ............................. |herdr-navigator-commands|
   6. Configuration ........................ |herdr-navigator-configuration|
   7. Health ............................... |herdr-navigator-health|
+  8. MRU pane navigation .................. |herdr-navigator-mru|
+  9. Reset history ........................ |herdr-navigator-reset|
 
 ==============================================================================
 1. INTRODUCTION                                   *herdr-navigator-introduction*
@@ -23,24 +25,29 @@ Neovim windows and herdr panes as if they were one layout.
 
 It is a two-sided handshake:
 
-- The herdr half (`herdr-plugin.toml` and `h-nav`) owns the direct chords.
-  Keybindings supply `invocation_source: "keybinding"` in
-  `HERDR_PLUGIN_CONTEXT_JSON`. For Neovim or fzf, `h-nav` forwards the key.
-  For other processes, including Vim, it runs `herdr pane focus`.
+- The Herdr half owns the direct chords. It contains `herdr-plugin.toml`,
+  `h-nav`, and `lib/select-mru.jq`. Keybindings supply
+  `invocation_source: "keybinding"` in `HERDR_PLUGIN_CONTEXT_JSON`.
+  For Neovim or fzf, `h-nav` forwards the key. Other processes, including Vim,
+  use MRU pane navigation with native directional fallback.
 - The Neovim half tries Neovim windows first. At the layout edge, it
   asynchronously runs `herdr plugin action invoke herdr-navigator.<direction>`.
   This calls the same action with `invocation_source: "cli"`. `h-nav` skips
-  process detection and key forwarding, then focuses the neighbouring pane.
+  process detection and key forwarding, then uses the same MRU pane selection.
   This prevents a loop back into Neovim. fzf handles the forwarded key itself.
 
-The four actions are `left`, `down`, `up`, and `right`. Manual CLI calls
-always move pane focus, without Neovim window navigation or fzf key handling.
-Other nonempty source strings retain the keybinding path.
+The four actions are `left`, `down`, `up`, and `right`. Manual CLI calls use
+MRU pane navigation, without Neovim window navigation or fzf key handling.
+Only `keybinding` permits key forwarding. All other nonempty string sources
+use pane navigation without process detection. An edge request can leave
+focus unchanged. See |herdr-navigator-mru|.
 
 `h-nav` reads the source with `jq`. Missing `jq`, absent or malformed JSON,
 or a missing, empty, or non-string source stops navigation with an error.
-No keys or focus changes follow this error. Herdr must supply
-`HERDR_BIN_PATH` and `HERDR_PANE_ID` for each action.
+These errors cause no key forwarding, history update, or focus fallback.
+Herdr must supply `HERDR_BIN_PATH` and `HERDR_PANE_ID` for each action.
+MRU selection also needs `HERDR_PLUGIN_ROOT`, `HERDR_PLUGIN_STATE_DIR`,
+and `HERDR_SOCKET_PATH`. Herdr supplies these to plugin commands.
 
 The plugin is a no-op unless nvim runs inside a herdr pane
 (`$HERDR_ENV == 1`).
@@ -58,13 +65,24 @@ never reach a nested tmux session (or vim-tmux-navigator inside it).
 - herdr >= 0.9.1 for invocation-source routing, macOS or Linux.
 - `jq` on the Herdr plugin runtime's $PATH. Every navigation action requires
   it, including key forwarding.
-- The herdr half of this repo installed and enabled as a herdr plugin (see
-  |herdr-navigator-installation|). Neovim edge navigation requires its actions.
+- Both halves installed from the same release or development checkout.
+  The Herdr plugin must be enabled. Neovim edge navigation requires its
+  actions. See |herdr-navigator-installation|.
+- Standard macOS/Linux utilities, including `tail` for history reads.
+- Optional `nc` (netcat) on the plugin runtime's $PATH, with support for
+  `-U -w 1`, for MRU focus by ID. Without it, pane navigation uses native
+  geometry. History updates and reset still work.
+
+The transport targets macOS netcat and Linux OpenBSD netcat. A local macOS
+silent-socket test demonstrated the one-second timeout. Linux timeout behavior
+still needs integration verification. Executable presence does not establish
+compatible flags or timeout behavior.
 
 ==============================================================================
 3. INSTALLATION                                   *herdr-navigator-installation*
 
-Both halves come from this one repository.
+Install both halves from the same release or development checkout.
+No separate MRU plugin or backend configuration is necessary.
 
 Herdr side: >sh
     herdr plugin install kaar/nvim-herdr-navigator
@@ -79,6 +97,10 @@ for the full snippet, including the `prefix+ctrl+l` clear-screen restore): >toml
 <
 and reload with `herdr server reload-config`. The direct `ctrl+h/j/k/l`
 chords must NOT also be bound to the `focus_pane_*` actions.
+
+After linking or enabling an installation with existing history, reset that
+history before navigation. These operations do not run the startup reset hook.
+See |herdr-navigator-reset|.
 
 Neovim side, e.g. with lazy.nvim: >lua
     { "kaar/nvim-herdr-navigator" }
@@ -143,17 +165,140 @@ It warns when $TMUX is set. tmux inside a herdr pane is not supported
 (see |herdr-navigator-introduction|).
 
 A successful process-info request establishes server reachability, not
-successful edge navigation. The health check does not check the Herdr
-version, installed actions, or `jq` in the plugin runtime. Neovim and the
-plugin runtime can have different $PATH values.
+successful edge navigation. The current health check does not inspect the
+Herdr version, installed actions, `jq`, `nc`, state access, or socket
+compatibility. Neovim and the plugin runtime can have different $PATH values.
 
 If edge navigation fails, inspect the installed actions and plugin logs: >sh
     herdr plugin action list --plugin herdr-navigator
     herdr plugin log list --plugin herdr-navigator
 <
 Missing or disabled actions and routing errors require an installation fix.
-There is no direct-focus fallback. The Lua notification reports only failure
-to start the Herdr executable. Action invocation returns before the action
-completes, so command failures require inspection of the plugin logs.
+Neovim does not bypass a failed action with a direct-focus call. After routing
+succeeds, `h-nav` provides native fallback for MRU failures.
+
+The Lua notification reports only failure to start the Herdr executable.
+Action invocation returns before the action completes. Action failures require
+inspection of the plugin logs.
+
+If pane navigation works but MRU preference does not, inspect the action
+runtime's dependencies and state context. Missing netcat, unavailable state,
+missing MRU environment variables, layout errors, or socket errors cause
+native fallback. A failed history update prints
+`h-nav: could not update history`.
+
+==============================================================================
+8. MRU PANE NAVIGATION                                      *herdr-navigator-mru*
+
+MRU means most recently used. History records sources of plugin pane-navigation
+requests, not confirmed focus changes from every source.
+
+Selection ~
+    With a tall Pane 1 on the left and Panes 2 and 3 stacked on the right:
+
+    1. Focus Pane 3.
+    2. Navigate left through the plugin to Pane 1.
+    3. Navigate right through the plugin. Pane 3 receives focus instead of 2.
+
+    The left request records [3]. The right request appends Pane 1 to produce
+    [3, 1]. The source cannot select itself. Neovim window-edge requests use
+    this same selection.
+
+    Older useful entries survive other moves. Add a short Pane 4 below Pane 1,
+    with Pane 1 still overlapping both right panes. After plugin moves
+    3 -> 1 -> 4 -> 1, a right request selects Pane 3.
+
+    Candidates must touch the source pane's edge in the requested direction
+    and have positive perpendicular overlap. Corner contact and gaps do not
+    count.
+
+    Among these candidates, the newest remembered pane wins. Recency takes
+    priority over overlap size and center distance. Selection excludes the
+    source and IDs outside the source's live tab layout. Closed panes and
+    panes in other tabs cannot win. Zoomed tabs use fallback.
+
+    Without an eligible remembered candidate, native Herdr focus determines
+    the destination. Selection does not wrap or cross tabs or workspaces.
+
+History ~
+    Path: $HERDR_PLUGIN_STATE_DIR/pane-mru
+
+    Each request appends one source pane ID, with the newest entry last.
+    Selection reads the last 256 lines in reverse order. Duplicate entries
+    remain but do not change the first eligible match. Lines that do not match
+    eligible pane IDs cannot win. The file grows until reset.
+
+    Every pane-navigation request appends its source before focus. Failed
+    focus requests and no-op edge requests also append their sources.
+    Destinations enter history on their next plugin departure. Key forwarding
+    and movement between Neovim windows do not read or update history.
+
+    Mouse clicks, native prefix moves, and direct Herdr focus calls alone do
+    not update history. A later plugin request records its source, however
+    that pane received focus. Clicking Pane 3, then Pane 1, does not by itself
+    establish a preference for Pane 3.
+
+    Native prefix bindings remain geometric. Prefix bindings configured as
+    plugin actions use MRU selection, subject to the Neovim/fzf forwarding rule.
+
+Fallback and transport ~
+    State errors, missing MRU prerequisites, layout errors, no eligible
+    remembered candidate, and socket failures cause native directional focus.
+    Native fallback always specifies the original source pane. Missing `jq`
+    or invalid invocation context stops navigation without fallback.
+
+    A selected target uses raw `pane.focus` through `nc -U -w 1`. The move
+    succeeds when `jq -e .result` accepts the server reply. A missing, null,
+    or false result causes native fallback. An empty or malformed reply, or
+    a transport failure without a result, also causes native fallback.
+    There is no socket retry. A lost response does not prove that focus
+    stayed unchanged.
+
+    On compatible netcat variants, the one-second timeout bounds the
+    raw-socket wait, not the total action duration.
+
+Limits and cost ~
+    Recording uses a shell append, without temporary files, traps, or renames.
+    Selection reads shared history after the append. Read or write failures
+    preserve native navigation. The plugin trusts its state directory and does
+    not reject symbolic links.
+
+    There is no writer lock. Concurrent requests can appear in each other's
+    history reads, and their order is not guaranteed. Reset can overlap appends
+    and reads. Use one active Herdr server per plugin state directory.
+
+    Existing newest-first files use the opposite order. Reset history once
+    before navigation with this version.
+
+    Every action parses its invocation source with `jq`. Keybindings also
+    query process information. Pane navigation appends one source ID and reads
+    at most 256 history lines for MRU selection.
+    With another remembered ID and the MRU prerequisites, it adds one layout
+    query and selection. A selected target adds one socket request. Otherwise,
+    it uses native focus. Neovim adds an asynchronous action call at its edge.
+
+==============================================================================
+9. RESET HISTORY                                         *herdr-navigator-reset*
+
+The manifest runs `sh h-nav --reset` through a startup hook after server
+restore and during live handoff. This clears stale history because Herdr can
+reuse pane IDs. Startup hooks run asynchronously, so early navigation can
+overlap the reset.
+
+Linking or enabling the plugin does not run this hook. Reset existing history
+manually before reuse after linking or enabling the plugin.
+
+First, stop navigation requests that can overlap the reset. From the plugin
+checkout, run this command with the actual plugin state directory: >sh
+    HERDR_PLUGIN_STATE_DIR="<actual absolute plugin state directory>" sh h-nav --reset
+<
+Do not guess the state directory or substitute the plugin source directory.
+Herdr supplies the state variable to plugin commands. Ordinary pane shells do
+not necessarily contain that variable.
+
+Reset truncates the history file, or creates it if absent. It requires
+HERDR_PLUGIN_STATE_DIR to name an existing writable directory. It needs no
+pane ID, invocation context, `jq`, `nc`, or socket connection. The shell reports
+a failure if it cannot open the file. The manifest has no public reset action.
 
 vim:tw=78:ts=8:noet:ft=help:norl:

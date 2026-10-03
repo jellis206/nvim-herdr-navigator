@@ -9,18 +9,52 @@
 # The Neovim plugin tries its windows first, then invokes the same action
 # via the CLI at its layout edge. CLI invocations focus panes without
 # forwarding keys. fzf handles the key itself. For other processes,
-# including Vim, move focus directly to the neighbouring herdr pane.
+# including Vim, use pane navigation: the most recently used (MRU)
+# neighbour from $HERDR_PLUGIN_STATE_DIR/pane-mru, else native focus.
 
 set -eu
 
-dir=$1
-case $dir in
+reset_history() {
+  : >"$HERDR_PLUGIN_STATE_DIR/pane-mru"
+}
+
+# Record request sources, not confirmed focus changes.
+record_source() (
+  printf '%s\n' "$1" >>"$HERDR_PLUGIN_STATE_DIR/pane-mru"
+)
+
+focus_mru() (
+  dir=$1
+  pane_id=$2
+  [ -n "${HERDR_SOCKET_PATH:-}" ] || return 1
+  [ -n "${HERDR_PLUGIN_ROOT:-}" ] || return 1
+  command -v nc >/dev/null 2>&1 || return 1
+  history=$(tail -n 256 "$HERDR_PLUGIN_STATE_DIR/pane-mru") || return 1
+  # A lone source cannot select itself. Avoid a layout request in this case.
+  [ -n "$history" ] && [ "$history" != "$pane_id" ] || return 1
+
+  layout=$("$herdr" pane layout --pane "$pane_id") || return 1
+  target=$(printf '%s\n' "$layout" | jq -er \
+    --arg dir "$dir" --arg source "$pane_id" \
+    --arg history "$history" \
+    -f "$HERDR_PLUGIN_ROOT/lib/select-mru.jq") || return 1
+
+  printf '{"id":"h-nav","method":"pane.focus","params":{"pane_id":"%s"}}\n' "$target" |
+    nc -U -w 1 "$HERDR_SOCKET_PATH" | jq -e .result >/dev/null
+)
+
+dir="${1-}"
+case "$dir" in
+--reset)
+  reset_history
+  exit
+  ;;
 left) key=ctrl+h ;;
 down) key=ctrl+j ;;
 up) key=ctrl+k ;;
 right) key=ctrl+l ;;
 *)
-  echo "usage: h-nav left|down|up|right" >&2
+  echo "usage: h-nav left|down|up|right|--reset" >&2
   exit 2
   ;;
 esac
@@ -48,10 +82,19 @@ nvim_or_fzf_in_pane() {
 # - keybinding: a Herdr keyboard binding
 # - cli: `herdr plugin action invoke` call from nvim
 if [ "$invocation_source" = keybinding ] && nvim_or_fzf_in_pane; then
- # Forward keys only for keybindings. Neovim tries its windows first,
- # then invokes this action via the CLI at its layout edge.
- exec "$herdr" pane send-keys "$pane_id" "$key"
-else
- # CLI and other invocation sources navigate panes without key forwarding.
- exec "$herdr" pane focus --direction "$dir" --pane "$pane_id"
+  # Forward keys only for keybindings. Neovim tries its windows first,
+  # then invokes this action via the CLI at its layout edge.
+  exec "$herdr" pane send-keys "$pane_id" "$key"
 fi
+
+# Pane navigation, including Neovim's CLI invocation at its window edge.
+if record_source "$pane_id"; then
+  if focus_mru "$dir" "$pane_id"; then
+    exit 0
+  fi
+else
+  echo "h-nav: could not update history" >&2
+fi
+
+# Fallback, no history or MRU failure
+exec "$herdr" pane focus --direction "$dir" --pane "$pane_id"

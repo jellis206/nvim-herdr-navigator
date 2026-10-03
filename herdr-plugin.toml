@@ -14,10 +14,13 @@
 
 id = "herdr-navigator"
 name = "Herdr Navigator"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.9.1"
 description = "Seamless ctrl+h/j/k/l across herdr panes and Neovim splits."
 platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["sh", "h-nav", "--reset"]
 
 [[actions]]
 id = "left"

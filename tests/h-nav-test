@@ -1,0 +1,286 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/h-nav-test.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+mkdir "$tmp/bin" "$tmp/plugin root" "$tmp/no-nc" "$tmp/no-jq"
+for utility in tail bash; do
+  ln -s "$(command -v "$utility")" "$tmp/no-nc/$utility"
+  ln -s "$(command -v "$utility")" "$tmp/no-jq/$utility"
+done
+ln -s "$(command -v jq)" "$tmp/no-nc/jq"
+ln -s "$root/lib" "$tmp/plugin root/lib"
+
+# Fake commands only. These tests never contact the running Herdr server.
+# shellcheck disable=SC2016
+printf '%s\n' '#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+printf "%s\t" "$@" >> "$HERDR_CALLS"
+printf "\n" >> "$HERDR_CALLS"
+case "${2:-}" in
+  process-info) printf "{\"name\":\"%s\"}\n" "$FAKE_PROCESS" ;;
+  layout) printf "%s\n" "$FAKE_LAYOUT"; exit "$FAKE_LAYOUT_STATUS" ;;
+  focus) exit "$FAKE_FOCUS_STATUS" ;;
+  send-keys) exit 0 ;;
+  *) exit 99 ;;
+esac' > "$tmp/bin/herdr"
+
+# shellcheck disable=SC2016
+printf '%s\n' '#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+printf "%s\t" "$@" > "$NC_ARGS"
+IFS= read -r request
+printf "%s\n" "$request" > "$NC_REQUEST"
+case "$FAKE_NC_MODE" in
+  success) printf "%s\n" "$request" | jq -c "{id: .id, result: {type: \"ok\"}}" ;;
+  error) printf "%s\n" "$request" | jq -c "{id: .id, error: {message: \"failed\"}}" ;;
+  null) printf "%s\n" "$request" | jq -c "{id: .id, result: null}" ;;
+  malformed) printf "not JSON\n" ;;
+  empty) exit 0 ;;
+  transport) exit 9 ;;
+  *) exit 98 ;;
+esac' > "$tmp/bin/nc"
+chmod +x "$tmp/bin/herdr" "$tmp/bin/nc"
+
+export PATH="$tmp/bin:$PATH"
+export HERDR_BIN_PATH="$tmp/bin/herdr"
+export HERDR_PLUGIN_ROOT="$tmp/plugin root"
+export HERDR_SOCKET_PATH="$tmp/fake socket"
+export HERDR_PLUGIN_STATE_DIR="$tmp/state"
+export HERDR_CALLS="$tmp/herdr-calls"
+export NC_ARGS="$tmp/nc-args"
+export NC_REQUEST="$tmp/nc-request"
+export FAKE_LAYOUT FAKE_PROCESS FAKE_LAYOUT_STATUS FAKE_FOCUS_STATUS FAKE_NC_MODE
+export HERDR_PANE_ID HERDR_PLUGIN_CONTEXT_JSON
+mkdir "$HERDR_PLUGIN_STATE_DIR"
+
+base_layout='{"result":{"type":"pane_layout","layout":{"zoomed":false,"panes":[
+  {"pane_id":"w1:p1","rect":{"x":0,"y":0,"width":40,"height":80}},
+  {"pane_id":"w1:p4","rect":{"x":0,"y":80,"width":40,"height":20}},
+  {"pane_id":"w1:p2","rect":{"x":40,"y":0,"width":40,"height":40}},
+  {"pane_id":"w1:p3","rect":{"x":40,"y":40,"width":40,"height":60}}
+]}}}'
+
+fail() { printf 'FAIL (%s): %s\n' "$shell" "$*" >&2; exit 1; }
+run() { "$shell_path" "$root/h-nav" "$@" > "$tmp/stdout" 2> "$tmp/stderr"; }
+new_case() {
+  rm -f "$HERDR_PLUGIN_STATE_DIR/pane-mru" "$NC_REQUEST" "$NC_ARGS"
+  : > "$HERDR_CALLS"
+  export HERDR_PANE_ID=w1:p1
+  HERDR_PLUGIN_CONTEXT_JSON='{"invocation_source":"cli"}'
+  FAKE_LAYOUT="$base_layout"
+  FAKE_PROCESS=nvim
+  FAKE_LAYOUT_STATUS=0
+  FAKE_FOCUS_STATUS=0
+  FAKE_NC_MODE=success
+}
+history() { printf '%s\n' "$@" > "$HERDR_PLUGIN_STATE_DIR/pane-mru"; }
+assert_history() {
+  printf '%s\n' "$@" > "$tmp/expected"
+  cmp -s "$tmp/expected" "$HERDR_PLUGIN_STATE_DIR/pane-mru" || fail 'history differs'
+}
+assert_native() {
+  rg -q $'pane\tfocus\t--direction\t' "$HERDR_CALLS" || fail 'missing native fallback'
+  rg -q -- "--pane"$'\t'"$HERDR_PANE_ID"$'\t' "$HERDR_CALLS" || fail 'wrong fallback source'
+}
+assert_target() {
+  jq -e --arg pane "$1" '.method == "pane.focus" and .params.pane_id == $pane and (.id | type == "string")' "$NC_REQUEST" >/dev/null || fail 'wrong target'
+  ! rg -q $'pane\tfocus\t' "$HERDR_CALLS" || fail 'duplicate native focus'
+  [[ $(< "$NC_ARGS") == $'-U\t-w\t1\t'"$HERDR_SOCKET_PATH"$'\t' ]] || fail 'wrong socket arguments'
+}
+
+shells=(sh)
+if command -v dash >/dev/null; then shells+=(dash); fi
+for shell in "${shells[@]}"; do
+  shell_path=$(command -v "$shell")
+  new_case
+  history w1:p3
+  HERDR_PLUGIN_CONTEXT_JSON=bad
+  unset HERDR_PANE_ID
+  run --reset
+  [[ ! -s "$HERDR_PLUGIN_STATE_DIR/pane-mru" && ! -s "$HERDR_CALLS" ]] || fail 'reset used pane context'
+  new_case
+  run right
+  assert_history w1:p1
+  assert_native
+  ! rg -q layout "$HERDR_CALLS" || fail 'lone source requested layout'
+
+  new_case
+  history w1:p3 invalid-id w1:p3 001 1 w1:p2
+  run right
+  assert_history w1:p3 invalid-id w1:p3 001 1 w1:p2 w1:p1
+  assert_target w1:p2
+  ! rg -q process-info "$HERDR_CALLS" || fail 'CLI ran process detection'
+  new_case
+  # An incomplete stored line cannot match a live pane after append.
+  printf 'w1:p3' > "$HERDR_PLUGIN_STATE_DIR/pane-mru"
+  run right
+  assert_history w1:p3w1:p1
+  assert_native
+  [[ ! -e "$NC_REQUEST" ]] || fail 'selected incomplete history line'
+
+  new_case
+  history w1:p2 w1:p3 w1:p2 invalid-id
+  run right
+  assert_target w1:p2
+
+  # 3 -> 1 -> 4 -> 1 -> right retains the older useful right-hand pane.
+  new_case
+  HERDR_PANE_ID=w1:p3; run left
+  HERDR_PANE_ID=w1:p1; run down
+  HERDR_PANE_ID=w1:p4; run up
+  HERDR_PANE_ID=w1:p1; run right
+  assert_history w1:p3 w1:p1 w1:p4 w1:p1
+  # Ignore native calls from earlier moves.
+  jq -e '.params.pane_id == "w1:p3"' "$NC_REQUEST" >/dev/null || fail 'lost older history'
+
+  new_case
+  for ((i=1; i<=300; i++)); do printf 'w1:p%s\n' "$i"; done > "$HERDR_PLUGIN_STATE_DIR/pane-mru"
+  HERDR_PANE_ID=w1:p999; run right
+  [[ $(wc -l < "$HERDR_PLUGIN_STATE_DIR/pane-mru") -eq 301 ]] || fail 'history was rewritten'
+
+  # The current source counts toward the 256-move read window, including repeats.
+  new_case
+  history w1:p3
+  for ((i=1; i<=254; i++)); do printf 'w1:p4\n'; done >> "$HERDR_PLUGIN_STATE_DIR/pane-mru"
+  run right
+  assert_target w1:p3
+  : > "$HERDR_CALLS"
+  rm "$NC_REQUEST"
+  run right
+  assert_native
+  [[ ! -e "$NC_REQUEST" ]] || fail 'selected history outside read window'
+
+  # All four directions, unequal panes, no wrap, and closed/other-tab IDs.
+  for spec in 'right w1:p1 w1:p3' 'left w1:p3 w1:p1' 'down w1:p2 w1:p3' 'up w1:p3 w1:p2'; do
+    new_case
+    read -r direction HERDR_PANE_ID target <<< "$spec"
+    history w9:p1 w1:pClosed "$target"
+    run "$direction"
+    assert_target "$target"
+  done
+
+  # A more recent non-touching pane cannot skip a touching candidate.
+  new_case
+  FAKE_LAYOUT=$(printf '%s\n' "$base_layout" | jq '.result.layout.panes += [{pane_id:"w1:p5",rect:{x:85,y:0,width:40,height:100}}]')
+  history w1:p2 w1:p3 w1:p5
+  run right; assert_target w1:p3
+
+  # A corner-only overlap is not adjacency.
+  new_case
+  history w1:p3
+  FAKE_LAYOUT=$(printf '%s\n' "$base_layout" | jq '.result.layout.panes[3].rect.y = 80')
+  run right; assert_native
+  [[ ! -e "$NC_REQUEST" ]] || fail 'selected corner-only neighbor'
+
+  # No touching neighbor, including a gap-only layout, uses native focus.
+  new_case; history w1:p3
+  run up; assert_native
+  [[ ! -e "$NC_REQUEST" ]] || fail 'selected neighbor beyond layout edge'
+  new_case; history w1:p3
+  FAKE_LAYOUT=$(printf '%s\n' "$base_layout" | jq '.result.layout.panes[2].rect.x = 45 | .result.layout.panes[3].rect.x = 45')
+  run right; assert_native
+  [[ ! -e "$NC_REQUEST" ]] || fail 'selected non-touching neighbor'
+
+  # Zoomed tabs and these unusable layouts still fall back without schema guards.
+  for filter in '.result.layout.zoomed = true' '.result.layout.panes[0].rect.width = 0' '.result.layout.panes[0].rect.x = "bad"' '.result.layout.panes |= .[1:]'; do
+    new_case; history w1:p3
+    FAKE_LAYOUT=$(printf '%s\n' "$base_layout" | jq "$filter")
+    run right; assert_native
+    [[ ! -e "$NC_REQUEST" ]] || fail 'invalid layout selected target'
+  done
+  for bad_layout in 'bad JSON' '{}'; do
+    new_case; history w1:p3; FAKE_LAYOUT="$bad_layout"
+    run right; assert_native
+  done
+  new_case; history w1:p3; FAKE_LAYOUT_STATUS=7
+  run right; assert_native
+  [[ ! -e "$NC_REQUEST" ]] || fail 'ignored failed layout command'
+
+  for mode in error null malformed empty transport; do
+    new_case; history w1:p3; FAKE_NC_MODE="$mode"
+    run right; assert_native
+  done
+  new_case; history w1:p3; FAKE_NC_MODE=error; FAKE_FOCUS_STATUS=8
+  if run right; then fail 'lost native failure status'; fi
+
+  for process in nvim nvimdiff .nvim-wrapped fzf fzf-wrapped; do
+    for direction in left down up right; do
+      new_case; history w1:p3
+      HERDR_PLUGIN_CONTEXT_JSON='{"invocation_source":"keybinding"}'
+      FAKE_PROCESS="$process"
+      run "$direction"
+      assert_history w1:p3
+      rg -q send-keys "$HERDR_CALLS" || fail 'missing passthrough'
+      ! rg -q 'layout|focus' "$HERDR_CALLS" || fail 'passthrough touched navigation'
+    done
+  done
+  new_case
+  HERDR_PLUGIN_CONTEXT_JSON='{"invocation_source":"keybinding"}'
+  FAKE_PROCESS=vim
+  run right; assert_native; assert_history w1:p1
+
+  for context in '' '{}' 'bad JSON' '{"invocation_source":null}'; do
+    new_case; history w1:p3; HERDR_PLUGIN_CONTEXT_JSON="$context"
+    if run right; then fail 'invalid routing accepted'; fi
+    assert_history w1:p3
+    [[ ! -s "$HERDR_CALLS" ]] || fail 'routing failure invoked Herdr'
+  done
+  new_case; history w1:p3
+  if run; then fail 'missing direction accepted'; else [[ $? -eq 2 ]] || fail 'wrong usage status'; fi
+  assert_history w1:p3
+  if run diagonal; then fail 'invalid direction accepted'; else [[ $? -eq 2 ]] || fail 'wrong usage status'; fi
+  assert_history w1:p3
+  [[ ! -s "$HERDR_CALLS" ]] || fail 'invalid direction invoked Herdr'
+  rg -q '^usage: h-nav ' "$tmp/stderr" || fail 'missing usage message'
+
+  # Missing state/socket, unknown source, or failed append preserve native focus.
+  new_case; unset HERDR_PLUGIN_STATE_DIR
+  run right; assert_native
+  export HERDR_PLUGIN_STATE_DIR="$tmp/state"
+  new_case; HERDR_PANE_ID='invalid-id'; history w1:p3
+  run right; assert_native; assert_history w1:p3 invalid-id
+  new_case; history w1:p3; unset HERDR_SOCKET_PATH
+  run right; assert_native
+  export HERDR_SOCKET_PATH="$tmp/fake socket"
+  new_case
+  mkdir "$HERDR_PLUGIN_STATE_DIR/pane-mru"
+  run right; assert_native
+  rg -q 'could not update history' "$tmp/stderr" || fail 'missing append warning'
+  ! rg -q layout "$HERDR_CALLS" || fail 'failed append requested layout'
+  rmdir "$HERDR_PLUGIN_STATE_DIR/pane-mru"
+
+  new_case; history w1:p3
+  PATH="$tmp/no-nc" run right
+  assert_native
+  assert_history w1:p3 w1:p1
+  ! rg -q layout "$HERDR_CALLS" || fail 'missing nc requested layout'
+
+  new_case; history w1:p3
+  if PATH="$tmp/no-jq" run right; then fail 'missing jq accepted'; fi
+  assert_history w1:p3
+  [[ ! -s "$HERDR_CALLS" ]] || fail 'missing jq invoked Herdr'
+  unset HERDR_PANE_ID
+  PATH="$tmp/no-jq" run --reset
+  [[ ! -s "$HERDR_PLUGIN_STATE_DIR/pane-mru" ]] || fail 'reset required jq or nc'
+
+  # A failed history read preserves the appended source and uses native focus.
+  new_case; history w1:p3
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 1' > "$tmp/bin/tail"
+  chmod +x "$tmp/bin/tail"
+  run right
+  assert_native
+  assert_history w1:p3 w1:p1
+  [[ ! -e "$NC_REQUEST" ]] || fail 'read failure used MRU'
+  ! rg -q layout "$HERDR_CALLS" || fail 'failed read requested layout'
+  rm "$tmp/bin/tail"
+
+  printf 'PASS: h-nav under %s\n' "$shell"
+done
