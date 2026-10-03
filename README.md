@@ -1,21 +1,22 @@
 # nvim-herdr-navigator
 
-Seamless navigation between Neovim splits and [herdr](https://herdr.dev) panes: one set of `ctrl+h/j/k/l` chords moves through vim windows and herdr panes as if they were a single layout. A port of the [vim-tmux-navigator](https://github.com/christoomey/vim-tmux-navigator) pattern to herdr.
+Seamless navigation between Neovim splits and [herdr](https://herdr.dev) panes: one set of `ctrl+h/j/k/l` chords moves through Neovim windows and herdr panes as if they were a single layout. A port of the [vim-tmux-navigator](https://github.com/christoomey/vim-tmux-navigator) pattern to herdr.
 
 This repository contains both the nvim plugin (`plugin/`, `lua/`, `doc/`) and the herdr plugin (`herdr-plugin.toml`, `h-nav`)
 
 ## How it works
 
-Both herdr and vim want to own `ctrl+h/j/k/l`, so the two sides cooperate:
+Herdr routes `ctrl+h/j/k/l` to the application first when it supports navigation:
 
-1. **Herdr owns the chords.** Each keypress runs the `h-nav` plugin action, which checks the focused pane's foreground process. If it is vim-like (vi/vim/nvim/gvim/view/lvim/… or fzf), the chord is passed through to the pane with `herdr pane send-keys`; otherwise herdr moves focus directly with `herdr pane focus --direction`.
-2. **Vim owns the chords while focused.** The mappings move between vim windows; when a move hits the edge of vim's layout, the plugin hands off asynchronously to `herdr pane focus`, crossing into the neighbouring pane.
+1. **Herdr owns the chords.** Each keypress runs the `h-nav` plugin action, which checks the focused pane's foreground process. For Neovim or fzf, it passes the chord through with `herdr pane send-keys`. For other processes, including Vim, it moves herdr pane focus directly with `herdr pane focus --direction`.
+2. **Neovim tries its windows first.** The plugin mappings move between Neovim windows. At the layout edge, the plugin asynchronously requests `herdr pane focus` to move to the neighbouring pane. fzf handles the key itself, without the Neovim edge handoff.
 
 ```
 terminal ── herdr binding (ctrl+h)
-             ├─ foreground is vim? ── send-keys ──▶ nvim wincmd
-             │                                       └─ at split edge? ──▶ herdr pane focus
-             └─ otherwise ──▶ herdr pane focus
+             ├─ Neovim ── send-keys ──▶ nvim wincmd
+             │                           └─ at split edge? ──▶ herdr pane focus
+             ├─ fzf ── send-keys ──▶ fzf handles the key
+             └─ other (including Vim) ──▶ herdr pane focus
 ```
 
 ## Requirements
@@ -109,7 +110,7 @@ require("herdr-navigator").setup({
 
 ## Notes & trade-offs
 
-- **Shadowed shell keys.** Like the tmux original, shells lose direct `ctrl+l` (clear), `ctrl+k` (kill-to-EOL) and `ctrl+h` (backspace) to navigation. `prefix+ctrl+l` restores clear-screen; the others still work while typing in vim's insert mode and in any pane whose foreground process matches the passthrough pattern.
+- **Shadowed shell keys.** Like the tmux original, shells lose direct `ctrl+l` (clear), `ctrl+k` (kill-to-EOL) and `ctrl+h` (backspace) to navigation. `prefix+ctrl+l` restores clear-screen; the others still work while typing in Neovim's insert mode and in any pane whose foreground process matches the passthrough pattern.
 - **`ctrl+h` vs Backspace.** `ctrl+h` and Backspace share byte `0x08` in legacy terminal encoding, so pass-through only distinguishes them when the kitty keyboard protocol is active. Neovim ≥ 0.10 negotiates it automatically inside herdr panes, keeping `<C-h>` distinct from `<BS>`.
 - **tmux is not supported.** Running tmux inside a herdr pane — with or without vim-tmux-navigator — is unsupported: herdr owns the chords and does not pass them through to tmux, so the chords never reach a nested tmux session. Use herdr panes directly instead.
 - **Normal mode only** (for now). Terminal-mode mappings à la vim-tmux-navigator are a planned follow-up.

@@ -26,11 +26,11 @@ It is a two-sided handshake:
 - The herdr half (a herdr plugin shipped in this same repo: the
   `herdr-plugin.toml` manifest and the `h-nav` script) owns the direct
   chords, but passes them through to the pane when its foreground process
-  is vim-like (vi/vim/nvim/gvim/view/lvim/... or fzf).
-- The nvim half (this plugin) owns the chords while nvim is focused,
-  moves between vim windows, and hands navigation back to herdr
-  (`herdr pane focus --direction ...`) when a window move hits the edge
-  of vim's layout.
+  is Neovim or fzf. For other processes, including Vim, it moves herdr
+  pane focus directly.
+- The Neovim half (this plugin) tries Neovim windows first, then requests
+  herdr pane focus (`herdr pane focus --direction ...`) at the layout edge.
+  fzf handles the key itself, without the Neovim edge handoff.
 
 The plugin is a no-op unless nvim runs inside a herdr pane
 (`$HERDR_ENV == 1`).

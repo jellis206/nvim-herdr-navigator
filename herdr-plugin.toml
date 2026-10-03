@@ -5,10 +5,10 @@
 # Local development (link does not run build steps):
 #   herdr plugin link /path/to/nvim-herdr-navigator
 #
-# Vim-aware directional pane focus (vim-tmux-navigator pattern): bound to
-# direct ctrl+h/j/k/l chords, passes the chord through when the focused
-# pane runs vim/fzf, otherwise moves herdr pane focus. The nvim half
-# (plugin/, lua/) hands navigation back at vim's layout edge.
+# Neovim-aware directional pane focus (vim-tmux-navigator pattern):
+# h-nav passes ctrl+h/j/k/l through to Neovim or fzf. The Neovim plugin
+# tries its windows first, then requests herdr pane focus at the edge.
+# For other processes, including Vim, h-nav moves herdr pane focus directly.
 
 id = "herdr-navigator"
 name = "Herdr Navigator"

@@ -1,14 +1,14 @@
 #!/bin/sh
-# h-nav: vim-aware directional pane focus — the herdr half of
+# h-nav: Neovim-aware directional pane focus, the herdr half of
 # nvim-herdr-navigator (the vim-tmux-navigator pattern for herdr; tmux
 # side equivalent: `if-shell "$is_vim" send-keys ...`).
 #
 # Runs as a plugin action (see herdr-plugin.toml), bound to the direct
 # ctrl+h/j/k/l chords as [[keys.command]] type="plugin_action" in the
-# user's config.toml. When the focused pane's foreground process is
-# vim-like, the chord is passed through to it; the nvim half (plugin/,
-# lua/) then calls `herdr pane focus` when a window move hits vim's
-# layout edge. Otherwise focus moves to the neighbouring herdr pane.
+# user's config.toml. Pass the chord through to Neovim or fzf.
+# The Neovim plugin tries its windows first, then calls `herdr pane focus`
+# at its layout edge. fzf handles the key itself. For other processes,
+# including Vim, move focus directly to the neighbouring herdr pane.
 
 set -eu
 
@@ -19,25 +19,26 @@ down) key=ctrl+j ;;
 up) key=ctrl+k ;;
 right) key=ctrl+l ;;
 *)
-	echo "usage: h-nav left|down|up|right" >&2
-	exit 2
-	;;
+  echo "usage: h-nav left|down|up|right" >&2
+  exit 2
+  ;;
 esac
 
-herdr=${HERDR_BIN_PATH:-herdr}
+herdr=${HERDR_BIN_PATH:?must run as a herdr plugin action}
 # Set by herdr for plugin actions; holds the focused pane at keypress time.
-pane=${HERDR_PANE_ID:?h-nav must run as a herdr plugin action}
+pane_id=${HERDR_PANE_ID:?must run as a herdr plugin action}
 
-# Same process-name test as vim-tmux-navigator's is_vim ps check, applied
-# to the foreground process names herdr reports for the pane. Matches
-# vi/vim/nvim/gvim/view/lvim/... and fzf (so ctrl+j/k keep moving fzf's
-# selection).
-pattern='g?\.?(view|l?n?vim?x?|fzf)(diff)?(-wrapped)?'
+nvim_or_fzf_in_pane() {
+  # Match Neovim or fzf process names, including wrapped binaries.
+  pattern='\.?(nvim(diff)?|fzf)(-wrapped)?'
+  "$herdr" pane process-info --pane "$pane_id" |
+    grep -iqE "\"name\":\"($pattern)\""
+}
 
-# The grep keys off the "name":"..." fields of the process-info JSON: the
-# quote delimiters anchor the match to the whole process name, so no jq
-# dependency is needed.
-if "$herdr" pane process-info --pane "$pane" | grep -iqE "\"name\":\"($pattern)\""; then
-	exec "$herdr" pane send-keys "$pane" "$key"
+if nvim_or_fzf_in_pane; then
+  # Pass the key through: Neovim tries its windows first and requests
+  # herdr pane focus only at its layout edge; fzf handles the key itself.
+  exec "$herdr" pane send-keys "$pane_id" "$key"
+else
+  exec "$herdr" pane focus --direction "$dir" --pane "$pane_id"
 fi
-exec "$herdr" pane focus --direction "$dir" --pane "$pane"
