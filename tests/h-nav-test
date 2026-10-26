@@ -25,7 +25,7 @@ printf "\n" >> "$HERDR_CALLS"
 case "${2:-}" in
   process-info) printf "{\"name\":\"%s\"}\n" "$FAKE_PROCESS" ;;
   layout) printf "%s\n" "$FAKE_LAYOUT"; exit "$FAKE_LAYOUT_STATUS" ;;
-  focus) exit "$FAKE_FOCUS_STATUS" ;;
+  focus) printf "%s" "$FAKE_FOCUS_OUTPUT"; exit "$FAKE_FOCUS_STATUS" ;;
   send-keys) exit 0 ;;
   *) exit 99 ;;
 esac' > "$tmp/bin/herdr"
@@ -57,7 +57,7 @@ export HERDR_PLUGIN_STATE_DIR="$tmp/state"
 export HERDR_CALLS="$tmp/herdr-calls"
 export NC_ARGS="$tmp/nc-args"
 export NC_REQUEST="$tmp/nc-request"
-export FAKE_LAYOUT FAKE_PROCESS FAKE_LAYOUT_STATUS FAKE_FOCUS_STATUS FAKE_NC_MODE
+export FAKE_LAYOUT FAKE_PROCESS FAKE_LAYOUT_STATUS FAKE_FOCUS_STATUS FAKE_FOCUS_OUTPUT FAKE_NC_MODE
 export HERDR_PANE_ID HERDR_PLUGIN_CONTEXT_JSON
 mkdir "$HERDR_PLUGIN_STATE_DIR"
 
@@ -79,6 +79,7 @@ new_case() {
   FAKE_PROCESS=nvim
   FAKE_LAYOUT_STATUS=0
   FAKE_FOCUS_STATUS=0
+  FAKE_FOCUS_OUTPUT=
   FAKE_NC_MODE=success
 }
 history() { printf '%s\n' "$@" > "$HERDR_PLUGIN_STATE_DIR/pane-mru"; }
@@ -281,6 +282,20 @@ for shell in "${shells[@]}"; do
   [[ ! -e "$NC_REQUEST" ]] || fail 'read failure used MRU'
   ! rg -q layout "$HERDR_CALLS" || fail 'failed read requested layout'
   rm "$tmp/bin/tail"
+
+  # A native move that finds no pane hands the edge to the Herdr client.
+  new_case
+  FAKE_FOCUS_OUTPUT='{"result":{"type":"pane_focus_direction","focus":{"changed":false}}}'
+  run left; assert_native
+  jq -e '.method == "client.focus_edge" and .params.direction == "left"' "$NC_REQUEST" >/dev/null ||
+    fail 'missing focus edge'
+  new_case
+  FAKE_FOCUS_OUTPUT='{"result":{"type":"pane_focus_direction","focus":{"changed":true}}}'
+  run left; assert_native
+  [[ ! -e "$NC_REQUEST" ]] || fail 'focus edge after a move'
+  new_case; FAKE_NC_MODE=transport
+  FAKE_FOCUS_OUTPUT='{"result":{"type":"pane_focus_direction","focus":{"changed":false}}}'
+  run left || fail 'focus edge transport failure changed status'
 
   printf 'PASS: h-nav under %s\n' "$shell"
 done

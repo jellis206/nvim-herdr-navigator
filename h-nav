@@ -97,4 +97,13 @@ else
 fi
 
 # Fallback, no history or MRU failure
-exec "$herdr" pane focus --direction "$dir" --pane "$pane_id"
+result=$("$herdr" pane focus --direction "$dir" --pane "$pane_id") || exit
+
+# No pane that way: hand the edge to the herdr client, which wraps around or
+# moves focus into its sidebar. Herdr builds without client.focus_edge reject
+# the request, which leaves focus where it is.
+if printf '%s\n' "$result" | jq -e '.result.focus.changed == false' >/dev/null &&
+  [ -n "${HERDR_SOCKET_PATH:-}" ] && command -v nc >/dev/null 2>&1; then
+  printf '{"id":"h-nav","method":"client.focus_edge","params":{"direction":"%s"}}\n' "$dir" |
+    nc -U -w 1 "$HERDR_SOCKET_PATH" >/dev/null 2>&1 || true
+fi
