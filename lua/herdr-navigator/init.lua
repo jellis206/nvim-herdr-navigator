@@ -50,6 +50,33 @@ function M.navigate(direction)
   elseif M.config.save_on_switch == "wall" then
     vim.cmd.wall()
   end
+  -- Fast path: ask herdr directly over its socket, no process launch.
+  -- passthrough=false so herdr does not hand the key straight back to us.
+  local socket, pane_id = vim.env.HERDR_SOCKET_PATH, vim.env.HERDR_PANE_ID
+  if socket and pane_id then
+    local pipe = vim.uv.new_pipe(false)
+    local request = vim.json.encode({
+      id = "herdr-navigator",
+      method = "pane.navigate",
+      params = { pane_id = pane_id, direction = direction, passthrough = false },
+    })
+    pipe:connect(socket, function(connect_err)
+      if connect_err then
+        pipe:close()
+        return
+      end
+      pipe:write(request .. "\n", function()
+        -- Read the reply so herdr finishes the request, then hang up.
+        pipe:read_start(function(_, data)
+          if not data or data:find("\n") then
+            pipe:close()
+          end
+        end)
+      end)
+    end)
+    return
+  end
+
   -- Async: do not wait for the CLI round-trip or stall Neovim's UI.
   -- Action invocation acknowledges startup, not the completed focus change.
   -- pcall reports spawn failures only. Action errors appear in plugin logs.
